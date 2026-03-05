@@ -67,3 +67,25 @@ export class PaginatedUsersResponseDto {
   @ApiProperty({ example: 100 })
   total: number;
 }
+
+export class CursorPaginatedUsersResponseDto {
+  @ApiProperty({ type: [UserResponseDto] })
+  items: UserResponseDto[];
+
+  @ApiProperty({ example: 20 })
+  limit: number;
+
+  @ApiProperty({
+    nullable: true,
+    example: 'eyJpZCI6InVzZXItMTIzIn0=',
+    description: 'Opaque cursor for the next page (null if no more pages)',
+  })
+  nextCursor: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    example: 'eyJpZCI6InVzZXItMTAwIn0=',
+    description: 'Opaque cursor for the previous page (null on first page)',
+  })
+  prevCursor: string | null;
+}

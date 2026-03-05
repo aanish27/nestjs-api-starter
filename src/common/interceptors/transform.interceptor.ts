@@ -9,6 +9,7 @@ import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import {
   ApiResponse,
+  CursorPaginationResult,
   PaginationResult,
   ResponseMeta,
 } from '../interfaces/response.interface';
@@ -42,6 +43,27 @@ export class TransformInterceptor<T> implements NestInterceptor<
       requestId: (request.headers['x-request-id'] as string) || randomUUID(),
     };
 
+    // Cursor-based pagination
+    if (this.isCursorPaginate(data)) {
+      const { items, limit, nextCursor, prevCursor } = data;
+
+      return {
+        success: true,
+        data: items as T,
+        meta: {
+          ...meta,
+          cursorPagination: {
+            limit,
+            nextCursor,
+            prevCursor,
+            hasNext: nextCursor !== null,
+            hasPrev: prevCursor !== null,
+          },
+        },
+      };
+    }
+
+    // Offset-based pagination
     if (this.isPaginate(data)) {
       const { items, page, limit, total } = data;
       const totalPages = Math.ceil(total / limit);
@@ -74,6 +96,20 @@ export class TransformInterceptor<T> implements NestInterceptor<
       'page' in data &&
       'limit' in data &&
       'total' in data
+    );
+  }
+
+  private isCursorPaginate(
+    data: unknown,
+  ): data is CursorPaginationResult<unknown> {
+    return (
+      typeof data === 'object' &&
+      data !== null &&
+      'items' in data &&
+      'nextCursor' in data &&
+      'prevCursor' in data &&
+      !('page' in data) &&
+      !('total' in data)
     );
   }
 }

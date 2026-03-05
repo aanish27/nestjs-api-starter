@@ -3,6 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { mockUser, mockAdmin } from '../../../test/fixtures/users.fixture';
+import { encodeCursor } from '@/common/utils/cursor.util';
 
 describe('UsersController', () => {
   let controller: UsersController;
@@ -12,6 +13,7 @@ describe('UsersController', () => {
     const mockUserService = {
       getFindById: jest.fn(),
       getAll: jest.fn(),
+      getAllCursor: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -26,6 +28,8 @@ describe('UsersController', () => {
   afterEach(() => {
     jest.clearAllMocks();
   });
+
+  // ─── findAll (offset) ────────────────────────────────────────────────────────
 
   describe('findAll', () => {
     const queryPagination = {
@@ -84,6 +88,106 @@ describe('UsersController', () => {
       expect(result.total).toBe(0);
     });
   });
+
+  // ─── findAllCursor ───────────────────────────────────────────────────────────
+
+  describe('findAllCursor', () => {
+    it('should return cursor-paginated response on first page', async () => {
+      const cursorResponse = {
+        items: [mockUser],
+        limit: 20,
+        nextCursor: encodeCursor(mockUser.id),
+        prevCursor: null,
+      };
+      usersService.getAllCursor.mockResolvedValue(cursorResponse);
+
+      const result = await controller.findAllCursor({
+        cursor: undefined,
+        prevCursor: undefined,
+        limit: 20,
+      });
+
+      expect(usersService.getAllCursor).toHaveBeenCalledWith(
+        undefined,
+        undefined,
+        20,
+      );
+      expect(result).toEqual(cursorResponse);
+      expect(result.nextCursor).toBe(encodeCursor(mockUser.id));
+      expect(result.prevCursor).toBeNull();
+    });
+
+    it('should forward cursor to service for forward navigation', async () => {
+      const cursorValue = encodeCursor(mockUser.id);
+      const cursorResponse = {
+        items: [mockAdmin],
+        limit: 10,
+        nextCursor: encodeCursor(mockAdmin.id),
+        prevCursor: cursorValue,
+      };
+      usersService.getAllCursor.mockResolvedValue(cursorResponse);
+
+      const result = await controller.findAllCursor({
+        cursor: cursorValue,
+        prevCursor: undefined,
+        limit: 10,
+      });
+
+      expect(usersService.getAllCursor).toHaveBeenCalledWith(
+        cursorValue,
+        undefined,
+        10,
+      );
+      expect(result.items).toHaveLength(1);
+      expect(result.prevCursor).toBe(cursorValue);
+    });
+
+    it('should forward prevCursor to service for backward navigation', async () => {
+      const prevCursorValue = encodeCursor(mockAdmin.id);
+      const cursorResponse = {
+        items: [mockUser],
+        limit: 10,
+        nextCursor: prevCursorValue,
+        prevCursor: null,
+      };
+      usersService.getAllCursor.mockResolvedValue(cursorResponse);
+
+      const result = await controller.findAllCursor({
+        cursor: undefined,
+        prevCursor: prevCursorValue,
+        limit: 10,
+      });
+
+      expect(usersService.getAllCursor).toHaveBeenCalledWith(
+        undefined,
+        prevCursorValue,
+        10,
+      );
+      expect(result).toEqual(cursorResponse);
+    });
+
+    it('should return empty list with both cursors null', async () => {
+      const emptyResponse = {
+        items: [],
+        limit: 20,
+        nextCursor: null,
+        prevCursor: null,
+      };
+      usersService.getAllCursor.mockResolvedValue(emptyResponse);
+
+      const result = await controller.findAllCursor({
+        cursor: undefined,
+        prevCursor: undefined,
+        limit: 20,
+      });
+
+      expect(result.items).toHaveLength(0);
+      expect(result.nextCursor).toBeNull();
+      expect(result.prevCursor).toBeNull();
+    });
+  });
+
+  // ─── findOne ─────────────────────────────────────────────────────────────────
 
   describe('findOne', () => {
     it('should return user by id without password', async () => {
