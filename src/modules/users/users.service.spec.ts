@@ -11,6 +11,7 @@ import {
 } from '../../../test/fixtures/users.fixture';
 import { plainToInstance } from 'class-transformer';
 import { UserResponseDto } from './dto/users.response.dto';
+import { encodeCursor, decodeCursor } from '@/common/utils/cursor.util';
 
 describe('UsersService', () => {
   let service: UsersService;
@@ -211,6 +212,110 @@ describe('UsersService', () => {
         limit: 10,
         total: totalCount,
       });
+    });
+  });
+
+  // ─── Cursor helpers ─────────────────────────────────────────────────────────
+
+  describe('encodeCursor / decodeCursor', () => {
+    it('should round-trip an id correctly', () => {
+      const id = 'user-abc-123';
+      expect(decodeCursor(encodeCursor(id))).toBe(id);
+    });
+
+    it('encoded cursor should be a valid base64 string', () => {
+      const cursor = encodeCursor('some-id');
+      expect(() => Buffer.from(cursor, 'base64')).not.toThrow();
+    });
+  });
+
+  // ─── getAllCursor ────────────────────────────────────────────────────────────
+
+  describe('getAllCursor', () => {
+    const limit = 2;
+
+    it('should return first page with nextCursor when more items exist', async () => {
+      // Repo returns limit+1 items → there is a next page
+      const extraItems = [mockUser, mockUsers[1], mockUsers[2]]; // 3 items for limit=2
+      userRepository.findAll.mockResolvedValue(extraItems);
+
+      const result = await service.getAllCursor(undefined, undefined, limit);
+
+      // Called with take = limit+1, ordered asc, no cursor filter
+      expect(userRepository.findAll).toHaveBeenCalledWith({
+        take: limit + 1,
+        orderBy: { id: 'asc' },
+      });
+
+      // items trimmed to limit
+      expect(result.items).toHaveLength(limit);
+      expect(result.limit).toBe(limit);
+      expect(result.nextCursor).not.toBeNull();
+      expect(result.prevCursor).toBeNull(); // first page has no prev
+    });
+
+    it('should return last page with nextCursor null when no more items', async () => {
+      // Repo returns exactly limit items → no next page
+      userRepository.findAll.mockResolvedValue([mockUser, mockUsers[1]]);
+
+      const result = await service.getAllCursor(undefined, undefined, limit);
+
+      expect(result.items).toHaveLength(limit);
+      expect(result.nextCursor).toBeNull();
+      expect(result.prevCursor).toBeNull();
+    });
+
+    it('should return empty result with both cursors null', async () => {
+      userRepository.findAll.mockResolvedValue([]);
+
+      const result = await service.getAllCursor(undefined, undefined, limit);
+
+      expect(result.items).toHaveLength(0);
+      expect(result.nextCursor).toBeNull();
+      expect(result.prevCursor).toBeNull();
+    });
+
+    it('should use WHERE id > afterId when cursor is provided (forward)', async () => {
+      const cursorId = mockUser.id;
+      const cursor = encodeCursor(cursorId);
+      userRepository.findAll.mockResolvedValue([mockUsers[1]]);
+
+      const result = await service.getAllCursor(cursor, undefined, limit);
+
+      expect(userRepository.findAll).toHaveBeenCalledWith({
+        where: { id: { gt: cursorId } },
+        take: limit + 1,
+        orderBy: { id: 'asc' },
+      });
+      expect(result.prevCursor).not.toBeNull(); // has a cursor → has prev
+    });
+
+    it('should use WHERE id < beforeId DESC and reverse when prevCursor is provided (backward)', async () => {
+      const prevCursorId = mockUsers[2].id;
+      const prevCursor = encodeCursor(prevCursorId);
+      // Repo returns items in DESC order (reversed in service)
+      userRepository.findAll.mockResolvedValue([mockUsers[1], mockUser]);
+
+      const result = await service.getAllCursor(undefined, prevCursor, limit);
+
+      expect(userRepository.findAll).toHaveBeenCalledWith({
+        where: { id: { lt: prevCursorId } },
+        take: limit + 1,
+        orderBy: { id: 'desc' },
+      });
+      // Items are reversed: mockUser first, then mockUsers[1]
+      expect(result.items[0].id).toBe(mockUser.id);
+      expect(result.items[1].id).toBe(mockUsers[1].id);
+    });
+
+    it('nextCursor encodes the last items id', async () => {
+      const threeItems = [mockUser, mockUsers[1], mockUsers[2]];
+      userRepository.findAll.mockResolvedValue(threeItems);
+
+      const result = await service.getAllCursor(undefined, undefined, limit);
+
+      // Last of trimmed items is mockUsers[1]
+      expect(result.nextCursor).toBe(encodeCursor(mockUsers[1].id));
     });
   });
 });
